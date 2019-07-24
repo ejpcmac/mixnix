@@ -8,7 +8,8 @@ let
 
   fixHex = { name, version, ...}@args:
     stdenv.mkDerivation {
-      name = "${name}-${version}-hex-source";
+      name = "${name}-hex-source";
+      version = version;
       src = fetchLockedHex ({ url = "https://repo.hex.pm/tarballs/${name}-${version}.tar"; } // args);
 
       phases = [ "unpackPhase" "installPhase" ];
@@ -30,7 +31,23 @@ let
       '';
     };
 
-  builders = {
+  rewriteRebarConfig = builtins.toFile "rewrite-rebar-config.exs" ''
+    case :file.consult("rebar.config") do
+      {:ok, rebar_config} ->
+        terms = rebar_config
+              |> List.keyreplace(:deps,    0, {:deps,    []})
+              # |> List.keyreplace(:plugins, 0, {:plugins, []})
+              # |> List.keyreplace(:provider_hooks, 0, {:provider_hooks, []})
+              # |> List.keyreplace(:artifacts, 0, {:artifacts, []})
+        File.write(
+          "rebar.config",
+          Enum.map(terms, fn(term) -> :io_lib.format("~tp.~n", [term]) end)
+        )
+      _ -> IO.puts("no rebar.config found")
+    end
+  '';
+
+  buildTools = {
     mix = { erlang
           , elixir
           , hex
@@ -52,8 +69,8 @@ let
 
       in
         stdenv.mkDerivation ({
-          name = "${name}-${version}";
-          version = version;
+          pname = name;
+          inherit version;
 
           propagatedBuildInputs = [ erlang hex elixir ] ++ beamDeps;
 
@@ -104,21 +121,22 @@ let
           '';
         } // extraArgs);
 
-    rebar3 = { buildRebar3, ... }:
+    rebar3 = { buildRebar3, elixir, ... }:
              { name
              , version
              , beamDeps
              , ...}@extraArgs:
       buildRebar3 ({
-        name = name;
+        pname = name;
+        inherit version;
         beamDeps = beamDeps;
-        version = extraArgs.version;
         preBuild = ''
           rm -f rebar.lock
+          ${elixir}/bin/elixir ${rewriteRebarConfig}
         '';
       } // extraArgs);
 
-    rebar = builders.rebar3;
+    rebar = buildTools.rebar3;
 
     make = { buildErlangMk, ... }:
            { name
@@ -126,17 +144,15 @@ let
            , beamDeps
            , ...}@extraArgs:
       buildErlangMk ({
-        name = name;
+        pname = name;
+        inherit version;
         beamDeps = beamDeps;
-        version = extraArgs.version;
       } // extraArgs);
   };
 
   srcWithout = rootPath: ignoredPaths:
-    let
-      ignoreStrings = map (path: toString path ) ignoredPaths;
-    in
-      filterSource (path: type: (all (i: i != path) ignoreStrings)) rootPath;
+    let ignoreStrings = map (path: toString path ) ignoredPaths;
+    in filterSource (path: type: (all (i: i != path) ignoreStrings)) rootPath;
 
 in rec {
   mix2nix = mkMixPackage {
@@ -225,15 +241,22 @@ in rec {
           defaultMixConfig = callPackage ./config { inherit rebar3 erlang elixir hex; };
           config = optionalAttrs (defaultMixConfig ? "${key}") (defaultMixConfig."${key}" basicArgs);
           givenConfig = optionalAttrs (mixConfig ? "${key}") (mixConfig."${key}" basicArgs);
+          combinedConfig = { buildTool = value.buildTool; } // basicArgs // config // givenConfig;
         in
-          builders."${value.builder}" {
+          buildTools."${combinedConfig.buildTool}" {
             inherit erlang elixir hex buildRebar3 buildErlangMk;
-          } (basicArgs // config // givenConfig)
+          } combinedConfig
       ) importedMixNix;
+
+      mixArgs = {
+        beamDeps = attrValues beamDepAttrs;
+      } // (filterAttrs (n: v:
+        n != "importedMixNix" &&
+        n != "mixConfig" &&
+        n != "buildTool"
+      ) args);
     in
-      builders.mix {
-        inherit hex erlang elixir;
-      } ({ beamDeps = attrValues beamDepAttrs; } // (filterAttrs (n: v: n != "importedMixNix") args) );
+      buildTools.mix { inherit hex erlang elixir; } mixArgs;
 
   mkMixPackage = { mixNix ? null  # the mix.nix file
                  , mixLock ? null # the mix.lock file
@@ -244,6 +267,6 @@ in rec {
     else if mixLock != null then
       mkPureMixPackage ({ importedMixNix = import (mkMixNix name mixLock); } // args)
     else
-      builders.mix args;
+      buildTools.mix args;
 
 }

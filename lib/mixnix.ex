@@ -36,7 +36,7 @@ defmodule Mixnix do
         url: repo_to_url(repo, name, version),
         sha256: hash
       },
-      builder: "mix"
+      buildTool: "mix"
     }
   end
 
@@ -47,7 +47,7 @@ defmodule Mixnix do
         url: repo_to_url(repo, name, version),
         sha256: hash
       },
-      builder: choose_builder(builders)
+      buildTool: choose_builder(builders)
     }
   end
 
@@ -103,7 +103,7 @@ defmodule Mixnix do
           url: repo,
           rev: ref
         },
-        builder: "mix"
+        buildTool: "mix"
       }
     }
   end
