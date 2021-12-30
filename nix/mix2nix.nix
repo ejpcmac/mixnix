@@ -76,7 +76,7 @@ let
 
           MIX_ENV = "prod";
           LC_ALL = "en_US.UTF-8";
-          LOCALE_ARCHIVE = stdenv.lib.optionalString stdenv.isLinux
+          LOCALE_ARCHIVE = lib.optionalString stdenv.isLinux
             "${glibcLocales}/lib/locale/locale-archive";
 
           setupHook = writeText "setupHook.sh" ''
